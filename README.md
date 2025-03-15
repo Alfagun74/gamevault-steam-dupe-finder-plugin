@@ -17,7 +17,7 @@ The plugin checks your Steam library daily and compares it against the games sto
 
 It smartly matches game names using Levenshtein distance to detect even closely named duplicates. For even greater accuracy, integrate IGDB — it’ll utilize Steam IDs directly from IGDB metadata.
 
-This plugin only logs matches. It doesn't modify or tag your games.
+This plugin only logs matches. It doesn't modify or tag your games. You can find the relevant logs by searching for the `SteamDupeFinderService` context.
 
 ## ⚙️ Usage & Customization
 
