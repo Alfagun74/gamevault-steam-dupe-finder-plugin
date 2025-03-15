@@ -10,6 +10,7 @@ import { SteamDupeFinderService } from "./steam-dupe-finder.service";
   imports: [GamesModule],
   controllers: [],
   providers: [SteamDupeFinderService],
+  exports: [SteamDupeFinderService],
 })
 export default class SteamDupeFinderPluginModule
   implements GameVaultPluginModule

@@ -2,9 +2,9 @@ import {
   BadRequestException,
   Injectable,
   Logger,
-  OnApplicationBootstrap,
+  OnModuleInit,
 } from "@nestjs/common";
-import { Cron } from "@nestjs/schedule";
+import { Cron, Timeout } from "@nestjs/schedule";
 import { kebabCase } from "lodash";
 import { stringSimilarity } from "string-similarity-js";
 import { GamesService } from "../../../src/modules/games/games.service";
@@ -13,25 +13,29 @@ import configuration, { getCensoredConfiguration } from "./configuration";
 import { GetOwnedGamesResponseWrapper, Game as SteamGame } from "./models";
 
 @Injectable()
-export class SteamDupeFinderService implements OnApplicationBootstrap {
+export class SteamDupeFinderService implements OnModuleInit {
   private readonly logger = new Logger(SteamDupeFinderService.name);
 
-  constructor(private readonly gamesService: GamesService) {
+  constructor(private readonly gamesService: GamesService) {}
+
+  onModuleInit() {
     this.logger.log({
       message: "Loaded Steam Dupe Finder Configuration.",
       configuration: getCensoredConfiguration(),
     });
   }
-  onApplicationBootstrap() {
+
+  @Timeout(60 * 1000)
+  initialScan() {
     this.findDuplicates();
   }
 
   @Cron(`*/${configuration.INTERVAL} * * * *`, {
     disabled: configuration.INTERVAL <= 0,
   })
-  async findDuplicates(): Promise<void> {
-    this.logger.log("Starting duplicate detection.");
+  public async findDuplicates(): Promise<Set<GamevaultGame>> {
     try {
+      this.logger.log("Starting duplicate detection.");
       const [steamGames, gamevaultGames] = await Promise.all([
         this.fetchSteamGames(),
         this.fetchGamevaultGames(),
@@ -40,8 +44,12 @@ export class SteamDupeFinderService implements OnApplicationBootstrap {
       this.logger.log(
         `Fetched ${steamGames.length} Steam games and ${gamevaultGames.length} Gamevault games.`,
       );
-      this.identifyDuplicateGames(gamevaultGames, steamGames);
-      this.logger.log("Finished duplicate detection.");
+      const duplicates = this.identifyDuplicateGames(
+        gamevaultGames,
+        steamGames,
+      );
+      this.logger.log(`Found ${duplicates.size} possible duplicates.`);
+      return duplicates;
     } catch (error) {
       this.logger.error("Error during duplicate detection", error);
     }
@@ -114,8 +122,6 @@ export class SteamDupeFinderService implements OnApplicationBootstrap {
         }
       }
     }
-
-    this.logger.log(`Identified ${duplicates.size} duplicates.`);
     return duplicates;
   }
 

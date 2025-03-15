@@ -17,11 +17,11 @@ The plugin checks your Steam library daily and compares it against the games sto
 
 It smartly matches game names using Levenshtein distance to detect even closely named duplicates. For even greater accuracy, integrate IGDB — it’ll utilize Steam IDs directly from IGDB metadata.
 
-> **Note:** This plugin only logs matches. It doesn't modify or tag your games.
+This plugin only logs matches. It doesn't modify or tag your games.
 
 ## ⚙️ Usage & Customization
 
-- **Automatic Checks:** Enabled by default (runs every 24 hours).
+- **Automatic Checks:** Enabled by default (runs every 24 hours). (An initial scan is triggered 1 minute after the server starts)
 - **Disable Plugin:** Set `PLUGIN_ALFAGUN74_STEAM_DUPE_FINDER_INTERVAL` to `0`.
 
 ## 🛠️ Configuration Options
