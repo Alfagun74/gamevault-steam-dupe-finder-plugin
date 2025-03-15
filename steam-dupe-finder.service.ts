@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+} from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import { kebabCase } from "lodash";
 import { stringSimilarity } from "string-similarity-js";
@@ -8,7 +13,7 @@ import configuration, { getCensoredConfiguration } from "./configuration";
 import { GetOwnedGamesResponseWrapper, Game as SteamGame } from "./models";
 
 @Injectable()
-export class SteamDupeFinderService {
+export class SteamDupeFinderService implements OnApplicationBootstrap {
   private readonly logger = new Logger(SteamDupeFinderService.name);
 
   constructor(private readonly gamesService: GamesService) {
@@ -16,6 +21,8 @@ export class SteamDupeFinderService {
       message: "Loaded Steam Dupe Finder Configuration.",
       configuration: getCensoredConfiguration(),
     });
+  }
+  onApplicationBootstrap() {
     this.findDuplicates();
   }
 
@@ -120,12 +127,8 @@ export class SteamDupeFinderService {
 
   private extractSteamAppId(game: GamevaultGame): string | null {
     return (
-      game.provider_metadata
-        ?.flatMap((metadata) =>
-          metadata.url_websites?.map(
-            (url) => url.match(/store\.steampowered\.com\/app\/(\d+)/)?.[1],
-          ),
-        )
+      game.metadata?.url_websites
+        ?.map((url) => url.match(/store\.steampowered\.com\/app\/(\d+)/)?.[1])
         .find(Boolean) ?? null
     );
   }
