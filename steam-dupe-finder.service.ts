@@ -97,7 +97,7 @@ export class SteamDupeFinderService implements OnModuleInit {
           gamevault_id: gamevaultGame.id,
           gamevault_title: gamevaultGame.title,
           steam_id: steamId,
-          steam_title: steamGameMap.get(steamId).name,
+          steam_title: steamGameMap.get(steamId)?.name,
         });
         duplicates.add(gamevaultGame);
         continue;
@@ -105,6 +105,8 @@ export class SteamDupeFinderService implements OnModuleInit {
 
       for (const steamGame of steamGames) {
         if (
+          gamevaultGame.title &&
+          steamGame.name &&
           stringSimilarity(
             kebabCase(gamevaultGame.title),
             kebabCase(steamGame.name),
@@ -115,7 +117,7 @@ export class SteamDupeFinderService implements OnModuleInit {
             gamevault_id: gamevaultGame.id,
             gamevault_title: gamevaultGame.title,
             steam_id: steamId,
-            steam_title: steamGameMap.get(steamId).name,
+            steam_title: steamGameMap.get(steamId)?.name,
           });
           duplicates.add(gamevaultGame);
           break;
