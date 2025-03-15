@@ -4,7 +4,7 @@ Automatically identifies and tags games in your vault that are also available in
 
 ## 🚀 Quick Setup
 
-1. **Download & Extract:** Get the latest [release](#) and unzip it into your server's mounted `plugins` directory.
+1. **Download & Extract:** Get the [latest release]([#](https://github.com/Alfagun74/gamevault-steam-dupe-finder-plugin/releases/latest)) and unzip it into your server's mounted `plugins` directory.
 2. **Steam API Key:** Grab your personal Steam API Key [here](https://steamcommunity.com/dev/apikey).
 3. **Set Your SteamID64:** Find your SteamID64 [here](https://steamid.io) and save it in the environment variable `PLUGIN_PHALCODE_STEAM_DUPE_FINDER_USER_ID_64`.
 4. **Configure API Key:** Set your Steam API Key in the environment variable `PLUGIN_PHALCODE_STEAM_DUPE_FINDER_API_KEY`.
