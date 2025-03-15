@@ -11,13 +11,15 @@ import { SteamDupeFinderService } from "./steam-dupe-finder.service";
   controllers: [],
   providers: [SteamDupeFinderService],
 })
-export default class SteamDupeFinderPluginModule implements GameVaultPluginModule {
+export default class SteamDupeFinderPluginModule
+  implements GameVaultPluginModule
+{
   metadata: GameVaultPluginModuleMetadataV1 = {
     name: "Steam Dupe Finder",
     author: "Alfagun74",
     version: "1.0.0",
     description:
-      "Checks & tags games if they are also available in your steam library.",
+      "Periodically logs if games in your vault are also available in your steam library.",
     keywords: ["steam", "duplicates"],
     license: "MIT",
   };
