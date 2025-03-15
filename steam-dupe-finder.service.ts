@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
+import { kebabCase } from "lodash";
 import { stringSimilarity } from "string-similarity-js";
 import { GamesService } from "../../../src/modules/games/games.service";
 import { GamevaultGame } from "../../../src/modules/games/gamevault-game.entity";
@@ -112,7 +113,12 @@ export class SteamDupeFinderService {
 
       // 2. Check for title similarity (fuzzy matching)
       for (const steamGame of steamGames) {
-        if (stringSimilarity(gamevaultGame.title, steamGame.name) > 0.9) {
+        if (
+          stringSimilarity(
+            kebabCase(gamevaultGame.title),
+            kebabCase(steamGame.name),
+          ) > 0.9
+        ) {
           duplicates.add(gamevaultGame);
           this.logDuplicate(gamevaultGame, [steamGame]);
           break; // Stop checking once a match is found
