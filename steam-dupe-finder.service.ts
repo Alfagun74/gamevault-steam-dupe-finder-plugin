@@ -4,7 +4,7 @@ import { kebabCase } from "lodash";
 import { stringSimilarity } from "string-similarity-js";
 import { GamesService } from "../../../src/modules/games/games.service";
 import { GamevaultGame } from "../../../src/modules/games/gamevault-game.entity";
-import configuration from "./configuration";
+import configuration, { getCensoredConfiguration } from "./configuration";
 import { GetOwnedGamesResponseWrapper, Game as SteamGame } from "./models";
 
 @Injectable()
@@ -12,32 +12,40 @@ export class SteamDupeFinderService {
   private readonly logger = new Logger(SteamDupeFinderService.name);
   private readonly DUPLICATE_TAG = "Duplicate: Steam";
 
-  constructor(private readonly gamesService: GamesService) {}
+  constructor(private readonly gamesService: GamesService) {
+    this.logger.log({
+      message: "Loaded Steam Dupe Finder Configuration.",
+      configuration: getCensoredConfiguration(),
+    });
+    this.findDuplicates();
+  }
 
-  /**
-   * Runs the duplicate detection at scheduled intervals.
-   */
   @Cron(`*/${configuration.INTERVAL} * * * *`, {
     disabled: configuration.INTERVAL <= 0,
   })
   async findDuplicates(): Promise<void> {
+    this.logger.log("Starting duplicate detection.");
     try {
-      // Fetch both Steam and Gamevault games in parallel (no caching)
       const [steamGames, gamevaultGames] = await Promise.all([
         this.fetchSteamGames(),
         this.fetchGamevaultGames(),
       ]);
 
-      // Identify duplicate games
+      this.logger.log(
+        `Fetched ${steamGames.length} Steam games and ${gamevaultGames.length} Gamevault games.`,
+      );
+
       const duplicates = this.identifyDuplicateGames(
         gamevaultGames,
         steamGames,
       );
 
-      // Tag detected duplicates
+      this.logger.log(`Identified ${duplicates.size} duplicates.`);
+
       await this.tagGamesAsDuplicate(duplicates);
+      this.logger.log("Finished tagging duplicates.");
     } catch (error) {
-      this.logger.error("Error finding duplicates", error);
+      this.logger.error("Error during duplicate detection", error);
     }
   }
 
@@ -45,22 +53,22 @@ export class SteamDupeFinderService {
    * Fetches the list of Steam games from the official Steam API.
    */
   private async fetchSteamGames(): Promise<SteamGame[]> {
-    this.logger.debug("Fetching Steam Games");
-    this.validateSteamConfig(); // Ensure API key and User ID are set
+    this.logger.debug("Fetching Steam games from API.");
+    this.validateSteamConfig();
 
     const url = `http://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?include_appinfo=1&key=${configuration.STEAM_API_KEY}&steamid=${configuration.STEAM_USER_ID}&format=json`;
     const response = await fetch(url);
 
     if (!response.ok) {
-      this.logger.error(
-        `Failed to fetch Steam Games: ${response.status} ${response.statusText}`,
-      );
-      throw new BadRequestException("Failed to fetch Steam Games.");
+      const errorMsg = `Steam API fetch failed with ${response.status}: ${response.statusText}`;
+      this.logger.error(errorMsg);
+      throw new BadRequestException(errorMsg);
     }
 
-    // Parse response data
     const data: GetOwnedGamesResponseWrapper = await response.json();
-    this.logger.log(`Fetched ${data.response.game_count} Steam Games.`);
+    this.logger.log(
+      `Successfully fetched ${data.response.game_count} Steam games.`,
+    );
 
     return data.response.games;
   }
@@ -69,6 +77,7 @@ export class SteamDupeFinderService {
    * Fetches the list of games from the Gamevault database.
    */
   private async fetchGamevaultGames(): Promise<GamevaultGame[]> {
+    this.logger.debug("Fetching Gamevault games from database.");
     return this.gamesService.find({
       loadRelations: true,
       loadDeletedEntities: false,
@@ -84,34 +93,33 @@ export class SteamDupeFinderService {
     gamevaultGames: GamevaultGame[],
     steamGames: SteamGame[],
   ): Set<GamevaultGame> {
+    this.logger.debug("Identifying duplicate games.");
     const duplicates = new Set<GamevaultGame>();
 
-    // Create a Map for Steam games to allow fast lookups by App ID
     const steamGameMap = new Map(
       steamGames.map((game) => [game.appid.toString(), game]),
     );
 
     for (const gamevaultGame of gamevaultGames) {
-      // Skip games that are already marked as duplicates
       if (
         gamevaultGame.user_metadata?.tags?.some(
           (tag) => tag.name === this.DUPLICATE_TAG,
         )
       ) {
+        this.logger.debug(
+          `Skipping already tagged game: ${gamevaultGame.title}`,
+        );
         continue;
       }
 
       // Extract Steam App ID from Gamevault metadata
       const steamId = this.extractSteamAppId(gamevaultGame);
-
-      // 1. Check for exact match by Steam App ID
       if (steamId && steamGameMap.has(steamId)) {
         duplicates.add(gamevaultGame);
-        this.logDuplicate(gamevaultGame, [steamGameMap.get(steamId)!]);
+        this.logDuplicate(gamevaultGame, steamGameMap.get(steamId)!);
         continue;
       }
 
-      // 2. Check for title similarity (fuzzy matching)
       for (const steamGame of steamGames) {
         if (
           stringSimilarity(
@@ -120,8 +128,8 @@ export class SteamDupeFinderService {
           ) > 0.9
         ) {
           duplicates.add(gamevaultGame);
-          this.logDuplicate(gamevaultGame, [steamGame]);
-          break; // Stop checking once a match is found
+          this.logDuplicate(gamevaultGame, steamGame);
+          break;
         }
       }
     }
@@ -134,14 +142,11 @@ export class SteamDupeFinderService {
    */
   private logDuplicate(
     gamevaultGame: GamevaultGame,
-    steamGames: SteamGame[],
+    steamGame: SteamGame,
   ): void {
-    const matchedSteamGame = steamGames[0];
-    this.logger.log({
-      message: "Found duplicate game.",
-      gamevault_title: gamevaultGame.title,
-      steam_title: matchedSteamGame.name,
-    });
+    this.logger.log(
+      `Duplicate detected: Gamevault [${gamevaultGame.title}] matches Steam [${steamGame.name}]`,
+    );
   }
 
   /**
@@ -151,15 +156,18 @@ export class SteamDupeFinderService {
   private async tagGamesAsDuplicate(
     duplicates: Set<GamevaultGame>,
   ): Promise<void> {
-    if (duplicates.size === 0) return;
+    if (duplicates.size === 0) {
+      this.logger.debug("No duplicates to tag.");
+      return;
+    }
 
     // Extract tag names before checking for "Duplicate: Steam"
     const updates = [...duplicates]
       .filter(
         (game) =>
-          !(game.user_metadata?.tags ?? [])
-            .map((tag) => tag.name)
-            .includes(this.DUPLICATE_TAG),
+          !(game.user_metadata?.tags ?? []).some(
+            (tag) => tag.name === this.DUPLICATE_TAG,
+          ),
       )
       .map((game) => ({
         id: game.id,
@@ -171,12 +179,13 @@ export class SteamDupeFinderService {
         },
       }));
 
-    if (updates.length > 0) {
-      // Batch update for better performance
-      await Promise.all(
-        updates.map((update) => this.gamesService.update(update.id, update)),
-      );
-    }
+    this.logger.log(`Tagging ${updates.length} games as duplicates.`);
+
+    await Promise.all(
+      updates.map((update) => this.gamesService.update(update.id, update)),
+    );
+
+    this.logger.log(`Successfully tagged duplicates.`);
   }
 
   /**
@@ -184,13 +193,13 @@ export class SteamDupeFinderService {
    */
   private validateSteamConfig(): void {
     if (!configuration.STEAM_API_KEY) {
-      this.logger.error("Steam API key is not set.");
-      throw new BadRequestException("Steam API key is not set.");
+      this.logger.error("Steam API key is missing.");
+      throw new BadRequestException("Steam API key not configured.");
     }
 
     if (!configuration.STEAM_USER_ID) {
-      this.logger.error("Steam User ID is not set.");
-      throw new BadRequestException("Steam User ID is not set.");
+      this.logger.error("Steam User ID is missing.");
+      throw new BadRequestException("Steam User ID not configured.");
     }
   }
 
@@ -199,14 +208,19 @@ export class SteamDupeFinderService {
    * If a Steam store URL is found, the App ID is extracted using regex.
    */
   private extractSteamAppId(game: GamevaultGame): string | null {
-    return (
+    const appId =
       game.provider_metadata
         ?.flatMap((metadata) =>
           metadata.url_websites?.map(
             (url) => url.match(/store\.steampowered\.com\/app\/(\d+)/)?.[1],
           ),
         )
-        .find(Boolean) ?? null
+        .find(Boolean) ?? null;
+
+    this.logger.debug(
+      `Extracted Steam App ID ${appId ?? "none"} for Gamevault game: ${game.title}`,
     );
+
+    return appId;
   }
 }
