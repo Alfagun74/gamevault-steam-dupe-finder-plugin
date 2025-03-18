@@ -10,7 +10,12 @@ import { stringSimilarity } from "string-similarity-js";
 import { GamesService } from "../../../src/modules/games/games.service";
 import { GamevaultGame } from "../../../src/modules/games/gamevault-game.entity";
 import configuration, { getCensoredConfiguration } from "./configuration";
-import { GetOwnedGamesResponseWrapper, Game as SteamGame } from "./models";
+import {
+  GetOwnedGamesResponseWrapper,
+  GetWishlistedGamesResponseWrapper,
+  SteamGame,
+  SteamWishlistItem,
+} from "./models";
 
 @Injectable()
 export class SteamDupeFinderService implements OnModuleInit {
@@ -25,51 +30,59 @@ export class SteamDupeFinderService implements OnModuleInit {
     });
   }
 
-  @Timeout(60 * 1000)
-  initialScan() {
-    this.findDuplicates();
+  @Timeout(10 * 1000)
+  async initialScan() {
+    await this.findDuplicates();
   }
 
   @Cron(`*/${configuration.INTERVAL} * * * *`, {
     disabled: configuration.INTERVAL <= 0,
   })
-  public async findDuplicates(): Promise<Set<GamevaultGame>> {
+  public async findDuplicates(): Promise<void> {
     try {
       this.logger.log("Starting duplicate detection.");
-      const [steamGames, gamevaultGames] = await Promise.all([
-        this.fetchSteamGames(),
+
+      const [steamGames, wishlistedGames, gamevaultGames] = await Promise.all([
+        this.fetchSteamLibraryGames(),
+        this.fetchSteamWishlistGames(),
         this.fetchGamevaultGames(),
       ]);
 
-      this.logger.log(
-        `Fetched ${steamGames.length} Steam games and ${gamevaultGames.length} Gamevault games.`,
+      this.logFetchResults(
+        steamGames.length,
+        wishlistedGames.length,
+        gamevaultGames.length,
       );
-      const duplicates = this.identifyDuplicateGames(
+
+      const libraryDuplicates = this.findMatchingGames(
         gamevaultGames,
         steamGames,
+        "library",
       );
-      this.logger.log(`Found ${duplicates.size} possible duplicates.`);
-      return duplicates;
+      const wishlistDuplicates = this.findMatchingGames(
+        gamevaultGames,
+        wishlistedGames,
+        "wishlist",
+      );
+
+      this.logDuplicateResults(libraryDuplicates.size, wishlistDuplicates.size);
     } catch (error) {
       this.logger.error("Error during duplicate detection", error);
     }
   }
 
-  private async fetchSteamGames(): Promise<SteamGame[]> {
-    this.validateSteamConfig();
+  private async fetchSteamLibraryGames(): Promise<SteamGame[]> {
+    return this.fetchFromSteamAPI<GetOwnedGamesResponseWrapper>(
+      `http://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?include_appinfo=1&key=${configuration.STEAM_API_KEY}&steamid=${configuration.STEAM_USER_ID}&format=json`,
+      "Steam library",
+    ).then((data) => data.response.games);
+  }
 
-    const url = `http://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?include_appinfo=1&key=${configuration.STEAM_API_KEY}&steamid=${configuration.STEAM_USER_ID}&format=json`;
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      const errorMsg = `Steam API fetch failed with ${response.status}: ${response.statusText}`;
-      this.logger.error(errorMsg);
-      throw new BadRequestException(errorMsg);
-    }
-
-    const data: GetOwnedGamesResponseWrapper = await response.json();
-
-    return data.response.games;
+  private async fetchSteamWishlistGames(): Promise<SteamWishlistItem[]> {
+    return this.fetchFromSteamAPI<GetWishlistedGamesResponseWrapper>(
+      `https://api.steampowered.com/IWishlistService/GetWishlist/v1?steamid=${configuration.STEAM_USER_ID}`,
+      "Steam wishlist",
+    ).then((data) => data.response.items);
   }
 
   private async fetchGamevaultGames(): Promise<GamevaultGame[]> {
@@ -79,52 +92,64 @@ export class SteamDupeFinderService implements OnModuleInit {
     });
   }
 
-  private identifyDuplicateGames(
+  private async fetchFromSteamAPI<T>(url: string, context: string): Promise<T> {
+    this.validateSteamConfig();
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new BadRequestException(
+        `${context} API fetch failed with ${response.status}: ${response.statusText}`,
+      );
+    }
+
+    return response.json();
+  }
+
+  private findMatchingGames(
     gamevaultGames: GamevaultGame[],
-    steamGames: SteamGame[],
+    steamItems: (SteamGame | SteamWishlistItem)[],
+    source: "library" | "wishlist",
   ): Set<GamevaultGame> {
+    const steamGameMap = new Map(
+      steamItems.map((game) => [String(game.appid), game]),
+    );
     const duplicates = new Set<GamevaultGame>();
 
-    const steamGameMap = new Map(
-      steamGames.map((game) => [game.appid.toString(), game]),
-    );
-
-    for (const gamevaultGame of gamevaultGames) {
-      const steamId = this.extractSteamAppId(gamevaultGame);
+    gamevaultGames.forEach((vaultGame) => {
+      const steamId = this.extractSteamAppId(vaultGame);
       if (steamId && steamGameMap.has(steamId)) {
-        this.logger.log({
-          message: "Found possible duplicate game via Steam ID.",
-          gamevault_id: gamevaultGame.id,
-          gamevault_title: gamevaultGame.title,
-          steam_id: steamId,
-          steam_title: steamGameMap.get(steamId)?.name,
-        });
-        duplicates.add(gamevaultGame);
-        continue;
+        this.logDuplicate(vaultGame, steamId, source);
+        duplicates.add(vaultGame);
+        return;
       }
 
-      for (const steamGame of steamGames) {
-        if (
-          gamevaultGame.title &&
-          steamGame.name &&
-          stringSimilarity(
-            kebabCase(gamevaultGame.title),
-            kebabCase(steamGame.name),
-          ) > 0.9
-        ) {
-          this.logger.log({
-            message: "Found possible duplicate game via title similarity.",
-            gamevault_id: gamevaultGame.id,
-            gamevault_title: gamevaultGame.title,
-            steam_id: steamId,
-            steam_title: steamGameMap.get(steamId)?.name,
-          });
-          duplicates.add(gamevaultGame);
-          break;
-        }
+      this.matchByTitle(vaultGame, steamItems, steamId, source, duplicates);
+    });
+
+    return duplicates;
+  }
+
+  private matchByTitle(
+    vaultGame: GamevaultGame,
+    steamItems: (SteamGame | SteamWishlistItem)[],
+    steamId: string | null,
+    source: "library" | "wishlist",
+    duplicates: Set<GamevaultGame>,
+  ) {
+    for (const steamItem of steamItems) {
+      if (
+        "name" in steamItem &&
+        vaultGame.title &&
+        stringSimilarity(
+          kebabCase(vaultGame.title),
+          kebabCase(steamItem.name),
+        ) > 0.9
+      ) {
+        this.logDuplicate(vaultGame, steamId, source);
+        duplicates.add(vaultGame);
+        break;
       }
     }
-    return duplicates;
   }
 
   private validateSteamConfig(): void {
@@ -139,5 +164,36 @@ export class SteamDupeFinderService implements OnModuleInit {
         ?.map((url) => url.match(/store\.steampowered\.com\/app\/(\d+)/)?.[1])
         .find(Boolean) ?? null
     );
+  }
+
+  private logFetchResults(
+    steamCount: number,
+    wishlistCount: number,
+    gamevaultCount: number,
+  ) {
+    this.logger.log(
+      `Fetched ${steamCount} Steam games, ${wishlistCount} wishlisted games, and ${gamevaultCount} Gamevault games.`,
+    );
+  }
+
+  private logDuplicateResults(libraryCount: number, wishlistCount: number) {
+    this.logger.log({
+      message: "Finished duplicate detection.",
+      duplicates_in_library: libraryCount,
+      duplicates_in_wishlist: wishlistCount,
+    });
+  }
+
+  private logDuplicate(
+    gamevaultGame: GamevaultGame,
+    steamId: string | null,
+    source: "library" | "wishlist",
+  ) {
+    this.logger.log({
+      message: `Found possible duplicate game in ${source}.`,
+      gamevault_id: gamevaultGame.id,
+      gamevault_title: gamevaultGame.title,
+      steam_id: steamId ?? "Unknown",
+    });
   }
 }

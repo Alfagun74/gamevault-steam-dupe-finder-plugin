@@ -1,13 +1,13 @@
 export interface GetOwnedGamesResponseWrapper {
-  response: Response;
+  response: GetOwnedGamesResponse;
 }
 
-export interface Response {
+export interface GetOwnedGamesResponse {
   game_count: number;
-  games: Game[];
+  games: SteamGame[];
 }
 
-export interface Game {
+export interface SteamGame {
   appid: number;
   name: string;
   playtime_forever: number;
@@ -22,4 +22,18 @@ export interface Game {
   playtime_disconnected: number;
   has_leaderboards?: boolean;
   playtime_2weeks?: number;
+}
+
+export interface GetWishlistedGamesResponseWrapper {
+  response: GetWishlistedGamesResponse;
+}
+
+export interface GetWishlistedGamesResponse {
+  items: SteamWishlistItem[];
+}
+
+export interface SteamWishlistItem {
+  appid: number;
+  priority: number;
+  date_added: number;
 }

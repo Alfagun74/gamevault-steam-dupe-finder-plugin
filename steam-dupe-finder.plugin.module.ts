@@ -10,7 +10,6 @@ import { SteamDupeFinderService } from "./steam-dupe-finder.service";
   imports: [GamesModule],
   controllers: [],
   providers: [SteamDupeFinderService],
-  exports: [SteamDupeFinderService],
 })
 export default class SteamDupeFinderPluginModule
   implements GameVaultPluginModule
@@ -18,9 +17,9 @@ export default class SteamDupeFinderPluginModule
   metadata: GameVaultPluginModuleMetadataV1 = {
     name: "Steam Dupe Finder",
     author: "Alfagun74",
-    version: "1.0.0",
+    version: "1.1.0",
     description:
-      "Periodically logs if games in your vault are also available in your steam library.",
+      "Periodically logs games from your vault that are also present in your Steam library or wishlist.",
     keywords: ["steam", "duplicates"],
     license: "MIT",
   };
